@@ -130,11 +130,16 @@ build_abi() {
     local ninja=$FLUTTER/third_party/ninja/ninja
     local patched
 
-    # Compile the interop sources first so a broken patch fails before the long build.
+    # Compile the interop library sources first so a broken patch fails before the long build.
+    # The examples in the same directory are not part of the SDK and need desktop GL headers.
     mapfile -t patched < <("$ninja" -C "$out_dir" -t targets all |
-        grep -oE '^obj/flutter/impeller/toolkit/interop/[a-z_]+\.[a-z_]+\.o' | sort -u)
-    log "Compiling ${#patched[@]} interop objects for $abi"
-    "$ninja" -C "$out_dir" -j "$JOBS" "${patched[@]}"
+        grep -oE '^obj/flutter/impeller/toolkit/interop/interop(_api|_base)?\.[a-z_]+\.o' |
+        sort -u)
+
+    if [[ ${#patched[@]} -gt 0 ]]; then
+        log "Compiling ${#patched[@]} interop objects for $abi"
+        "$ninja" -C "$out_dir" -j "$JOBS" "${patched[@]}"
+    fi
 
     log "Building $abi"
     "$ninja" -C "$out_dir" -j "$JOBS" flutter/impeller/toolkit/interop:sdk
@@ -155,7 +160,19 @@ package_abi() {
 
     extra=$(mktemp -d)
     cp "$ENGINE/flutter/LICENSE" "$extra/LICENSE"
+    cp "$ENGINE/flutter/sky/packages/sky_engine/LICENSE" "$extra/THIRD_PARTY_LICENSES"
     cp "$PATCH" "$extra/interop.patch"
+    # Flutter's CI adds LICENSE.sdk.md to the published SDK zips; this is the same pointer.
+    cat > "$extra/LICENSE.sdk.md" <<EOF
+# Minion Impeller SDK
+
+This bundle is the Impeller interop SDK from the Flutter engine, built by
+[minion-js/impeller-sdk](https://github.com/minion-js/impeller-sdk) with \`interop.patch\` applied.
+
+The source code is hosted at [flutter/flutter/engine/src/flutter/impeller/toolkit/interop](https://github.com/flutter/flutter/tree/$REVISION/engine/src/flutter/impeller/toolkit/interop).
+The Flutter engine license is in \`LICENSE\` (BSD 3-Clause). The licenses of the bundled third-party
+code are in \`THIRD_PARTY_LICENSES\`, a copy of [sky_engine/LICENSE](https://github.com/flutter/flutter/tree/$REVISION/engine/src/flutter/sky/packages/sky_engine/LICENSE).
+EOF
     cat > "$extra/MINION.md" <<EOF
 # Minion Impeller SDK
 
@@ -167,7 +184,7 @@ Release: $REVISION-minion.$MINION_RELEASE
 The patched header defines \`IMPELLER_MINION_EXTENSIONS\`. The libraries and headers are
 Flutter engine code under the BSD-3-Clause license in \`LICENSE\`.
 EOF
-    (cd "$extra" && zip -q "$archive" LICENSE interop.patch MINION.md)
+    (cd "$extra" && zip -q "$archive" LICENSE LICENSE.sdk.md THIRD_PARTY_LICENSES interop.patch MINION.md)
     rm -rf "$extra"
 
     log "Packaged $archive"
