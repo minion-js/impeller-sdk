@@ -1,0 +1,98 @@
+name: Build
+
+on:
+    workflow_dispatch:
+        inputs:
+            release:
+                description: Create or update the <revision>-minion.<n> release with the SDKs
+                type: boolean
+                default: false
+            runner:
+                description: Runner label (a larger Linux x64 runner builds much faster)
+                type: string
+                default: ubuntu-latest
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        name: ${{ matrix.abi }}
+        runs-on: ${{ inputs.runner }}
+        timeout-minutes: 360
+        strategy:
+            fail-fast: false
+            matrix:
+                abi: [arm64-v8a, armeabi-v7a, x86_64]
+        steps:
+            - uses: actions/checkout@v4
+
+            # The engine checkout and one ABI's build output need ~45 GB.
+            - name: Free disk space
+              run: |
+                  sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                      /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+                      /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
+                  sudo docker image prune --all --force || true
+                  sudo apt-get clean
+                  df -h
+
+            - name: Pick the largest disk
+              run: |
+                  work=$HOME/impeller-sdk-work
+
+                  if [[ -d /mnt ]] && (( $(df --output=avail /mnt | tail -1) > $(df --output=avail / | tail -1) )); then
+                      sudo mkdir -p /mnt/impeller-sdk-work
+                      sudo chown "$USER" /mnt/impeller-sdk-work
+                      work=/mnt/impeller-sdk-work
+                  fi
+
+                  echo "IMPELLER_SDK_WORK=$work" >> "$GITHUB_ENV"
+
+            - name: Sync
+              run: ./build.sh sync
+
+            - name: Build
+              run: ./build.sh build ${{ matrix.abi }}
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: impeller-sdk-android-${{ matrix.abi }}
+                  path: out/impeller-sdk-android-${{ matrix.abi }}.zip
+                  compression-level: 0
+                  if-no-files-found: error
+
+    release:
+        if: ${{ inputs.release }}
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/download-artifact@v4
+              with:
+                  path: out
+                  pattern: impeller-sdk-android-*
+                  merge-multiple: true
+
+            - name: Publish
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  revision=$(tr -d '[:space:]' < REVISION)
+                  tag=$revision-minion.$(tr -d '[:space:]' < RELEASE)
+
+                  cd out
+                  sha256sum impeller-sdk-android-*.zip > SHA256SUMS
+                  cat SHA256SUMS
+
+                  if gh release view "$tag" > /dev/null 2>&1; then
+                      gh release upload "$tag" impeller-sdk-android-*.zip SHA256SUMS --clobber
+                  else
+                      gh release create "$tag" impeller-sdk-android-*.zip SHA256SUMS \
+                          --target "$GITHUB_SHA" \
+                          --title "$tag" \
+                          --notes "Impeller interop SDK for Android built from flutter/flutter@$revision with patches/interop.patch."
+                  fi
