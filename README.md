@@ -60,8 +60,9 @@ https://github.com/minion-js/impeller-sdk/releases/download/<revision>-minion.<n
 ```
 
 Each zip has the stock `impeller_sdk.zip` layout (`include/impeller.h`, `include/impeller.hpp`,
-`lib/libimpeller.so`, `lib/libimpeller.a`, `README.md`, `examples/`) plus `LICENSE` (Flutter's
-BSD-3-Clause license), `MINION.md` and `interop.patch`. Like the stock SDK, the libraries keep
+`lib/libimpeller.so`, `lib/libimpeller.a`, `README.md`, `examples/`, `LICENSE.sdk.md`) plus
+`LICENSE` (Flutter's BSD-3-Clause license), `THIRD_PARTY_LICENSES` (the engine's license list for
+bundled third-party code), `MINION.md` and `interop.patch`. Like the stock SDK, the libraries keep
 their debug symbols; strip them when packaging an app.
 
 ## Building
